@@ -43,6 +43,30 @@ st.markdown("""
     .remove-button > button:hover {
         background-color: #c82333;
     }
+    .present-badge {
+        background-color: #28a745;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        display: inline-block;
+    }
+    .absent-badge {
+        background-color: #dc3545;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        display: inline-block;
+    }
+    .not-marked-badge {
+        background-color: #ffc107;
+        color: #856404;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        display: inline-block;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -75,9 +99,13 @@ def load_csv(file):
         if 'participant_id' not in df.columns:
             df.insert(0, 'participant_id', [str(uuid.uuid4())[:8] for _ in range(len(df))])
         
-        # Add attendance status column
+        # Add attendance status column if not present
         if 'attendance_status' not in df.columns:
             df['attendance_status'] = 'Not Marked'
+        
+        # Add attendance timestamp column
+        if 'attendance_time' not in df.columns:
+            df['attendance_time'] = ''
         
         return df
     except Exception as e:
@@ -108,13 +136,15 @@ def add_new_participant(df, new_data):
         'Marital_Status': new_data['marital_status'],
         'Occupation': new_data['occupation'],
         'Preferred_Password': new_data['password'],
-        'attendance_status': 'Present'
+        'attendance_status': 'Present',
+        'attendance_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
     return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
 def update_attendance(df, participant_id, status):
     """Update attendance status for a participant"""
     df.loc[df['participant_id'] == participant_id, 'attendance_status'] = status
+    df.loc[df['participant_id'] == participant_id, 'attendance_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     return df
 
 def remove_csv():
@@ -123,6 +153,15 @@ def remove_csv():
     st.session_state.uploaded_file_name = None
     st.session_state.show_success = False
     st.session_state.success_message = ""
+
+def get_attendance_badge(status):
+    """Return HTML badge for attendance status"""
+    if status == 'Present':
+        return '✅ Present'
+    elif status == 'Absent':
+        return '❌ Absent'
+    else:
+        return '⏳ Not Marked'
 
 def main():
     st.title("🎯 IYC Participants Accreditation System")
@@ -180,9 +219,9 @@ def main():
                 mime="text/csv"
             )
             
-            # Statistics
+            # Statistics with visual indicators
             st.markdown("---")
-            st.header("📊 Statistics")
+            st.header("📊 Attendance Statistics")
             total = len(st.session_state.participants_df)
             present = len(st.session_state.participants_df[st.session_state.participants_df['attendance_status'] == 'Present'])
             absent = len(st.session_state.participants_df[st.session_state.participants_df['attendance_status'] == 'Absent'])
@@ -191,10 +230,10 @@ def main():
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Total Participants", total)
-                st.metric("Present", present)
+                st.metric("✅ Present", present, delta=f"{present/total*100:.1f}%" if total > 0 else "0%")
             with col2:
-                st.metric("Absent", absent)
-                st.metric("Not Marked", not_marked)
+                st.metric("❌ Absent", absent, delta=f"{absent/total*100:.1f}%" if total > 0 else "0%")
+                st.metric("⏳ Not Marked", not_marked, delta=f"{not_marked/total*100:.1f}%" if total > 0 else "0%")
     
     # Main content area
     if st.session_state.participants_df is not None:
@@ -208,7 +247,7 @@ def main():
             search_term = st.text_input("Enter search term", placeholder="Type name, branch, or zone...", key="search_input")
         
         with col2:
-            search_by = st.selectbox("Search by", ['First_Name', 'Last_Name', 'Zone', 'Branch_Church', 'Username/Email'], key="search_by")
+            search_by = st.selectbox("Search by", ['First_Name', 'Last_Name', 'Zone', 'Branch_Church', 'Username/Email', 'attendance_status'], key="search_by")
         
         with col3:
             if st.button("🔄 Clear Search"):
@@ -229,7 +268,11 @@ def main():
         
         # Display each participant in an expandable card
         for idx, participant in filtered_df.iterrows():
-            with st.expander(f"👤 {participant['First_Name']} {participant['Last_Name']} - {participant.get('Zone', 'N/A')}"):
+            # Get attendance badge text
+            attendance_badge = get_attendance_badge(participant.get('attendance_status', 'Not Marked'))
+            
+            # Create expander without HTML in title
+            with st.expander(f"👤 {participant['First_Name']} {participant['Last_Name']} - {participant.get('Zone', 'N/A')} | {attendance_badge}"):
                 col1, col2 = st.columns([3, 1])
                 
                 with col1:
@@ -243,28 +286,40 @@ def main():
                     **⛪ Branch Church:** {participant.get('Branch_Church', 'N/A')}  
                     **💍 Marital Status:** {participant.get('Marital_Status', 'N/A')}  
                     **💼 Occupation:** {participant.get('Occupation', 'N/A')}  
-                    **✅ Attendance Status:** {participant.get('attendance_status', 'Not Marked')}
+                    **✅ Attendance Status:** {participant.get('attendance_status', 'Not Marked')}  
+                    **🕐 Attendance Time:** {participant.get('attendance_time', 'Not marked yet') if participant.get('attendance_time') else 'Not marked yet'}
                     """)
                 
                 with col2:
                     st.markdown("### Mark Attendance")
+                    current_status = participant.get('attendance_status', 'Not Marked')
                     
-                    if st.button("✅ Present", key=f"present_{participant['participant_id']}"):
+                    # Show current status
+                    if current_status == 'Present':
+                        st.success("✅ Currently: PRESENT")
+                    elif current_status == 'Absent':
+                        st.error("❌ Currently: ABSENT")
+                    else:
+                        st.warning("⏳ Currently: NOT MARKED")
+                    
+                    st.markdown("---")
+                    
+                    if st.button("✅ Mark Present", key=f"present_{participant['participant_id']}"):
                         st.session_state.participants_df = update_attendance(
                             st.session_state.participants_df, 
                             participant['participant_id'], 
                             'Present'
                         )
-                        st.success(f"✅ {participant['First_Name']} {participant['Last_Name']} marked as PRESENT")
+                        st.success(f"✅ {participant['First_Name']} {participant['Last_Name']} marked as PRESENT at {datetime.now().strftime('%H:%M:%S')}")
                         st.rerun()
                     
-                    if st.button("❌ Absent", key=f"absent_{participant['participant_id']}"):
+                    if st.button("❌ Mark Absent", key=f"absent_{participant['participant_id']}"):
                         st.session_state.participants_df = update_attendance(
                             st.session_state.participants_df, 
                             participant['participant_id'], 
                             'Absent'
                         )
-                        st.warning(f"❌ {participant['First_Name']} {participant['Last_Name']} marked as ABSENT")
+                        st.warning(f"❌ {participant['First_Name']} {participant['Last_Name']} marked as ABSENT at {datetime.now().strftime('%H:%M:%S')}")
                         st.rerun()
         
         # Add new participant section - WITH DYNAMIC ZONE/BRANCH OUTSIDE FORM
@@ -370,12 +425,18 @@ def main():
         - ✅ Search and filter functionality
         - ✅ Real-time attendance tracking
         - ✅ Export updated data anytime
+        - ✅ Attendance timestamps recorded
+        - ✅ Visual badges for attendance status
         
         ### CSV Format Expected:
         The system expects columns similar to:
         - Timestamp, First Name, Last Name, Username/Email, Phone Number
         - Date of Birth, Gender, Zone, Branch Church, Marital Status
         - Occupation, Preferred Password
+        
+        **The system automatically adds:**
+        - attendance_status (Present/Absent/Not Marked)
+        - attendance_time (when attendance was marked)
         """)
         
         # Sample data display
