@@ -1,10 +1,20 @@
 import streamlit as st
 import pandas as pd
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 # Page configuration
 st.set_page_config(page_title="IYC Accreditation System", page_icon="📋", layout="wide")
+
+# Define zones and their branches
+ZONES_BRANCHES = {
+    "Ayetoro Zone": ["Ayetoro", "Imasayi", "Kajola", "Igbogila", "Imala"],
+    "Ilaro Zone": ["Ilaro", "Idogo", "Ohunbe", "Oja odan", "Iwoye"],
+    "Itori-Oke Zone": ["Itori-Oke", "Adehun", "Olosun", "Ibara-Orile", "Adigbe", "Olomore", "Ita-Oshin"],
+    "Oke Abetu Zone": ["Oke-Abetu", "Gbonagun", "Mawuko", "Ita Elega", "Imeko", "Igbo-Ora", "Jangede"],
+    "Owode Zone": ["Powerline", "Kajola", "Ogunmakin", "Obafemi", "Ofada", "Odofin-Oke", "Oba-Erin", "Itoku-Aro", "Siun"],
+    "Odeda Zone": ["Odeda", "Agbetu", "Olugbo", "Orile-ilugun", "Olofin", "Fagbohun", "Olokokun"]
+}
 
 # Custom CSS for better styling
 st.markdown("""
@@ -51,6 +61,8 @@ if 'clear_form' not in st.session_state:
     st.session_state.clear_form = False
 if 'uploaded_file_name' not in st.session_state:
     st.session_state.uploaded_file_name = None
+if 'selected_zone' not in st.session_state:
+    st.session_state.selected_zone = "Ayetoro Zone"
 
 def load_csv(file):
     """Load CSV file and prepare dataframe"""
@@ -96,7 +108,7 @@ def add_new_participant(df, new_data):
         'Marital_Status': new_data['marital_status'],
         'Occupation': new_data['occupation'],
         'Preferred_Password': new_data['password'],
-        'attendance_status': 'Present'  # Auto-mark present for new registrations
+        'attendance_status': 'Present'
     }
     return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
@@ -255,11 +267,32 @@ def main():
                         st.warning(f"❌ {participant['First_Name']} {participant['Last_Name']} marked as ABSENT")
                         st.rerun()
         
-        # Add new participant section
+        # Add new participant section - WITH DYNAMIC ZONE/BRANCH OUTSIDE FORM
         st.markdown("---")
         st.header("➕ Add New Participant (Not in CSV)")
         
-        # Create a form with a unique key that resets after submission
+        # Zone and Branch selection OUTSIDE the form for dynamic updates
+        col_zone, col_branch = st.columns(2)
+        
+        with col_zone:
+            selected_zone = st.selectbox(
+                "Select Zone *", 
+                options=list(ZONES_BRANCHES.keys()),
+                key="zone_selector",
+                help="Choose the participant's zone"
+            )
+        
+        with col_branch:
+            # Get branches for selected zone
+            available_branches = ZONES_BRANCHES.get(selected_zone, [])
+            selected_branch = st.selectbox(
+                "Select Branch Church *", 
+                options=available_branches,
+                key="branch_selector",
+                help="Choose the participant's branch church"
+            )
+        
+        # Now the form for the rest of the details
         with st.form(key="new_participant_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             
@@ -268,12 +301,20 @@ def main():
                 last_name = st.text_input("Last Name *")
                 email = st.text_input("Email/Username *")
                 phone = st.text_input("Phone Number *")
-                dob = st.date_input("Date of Birth", value=None)
+                
+                # Date of Birth with expanded range (1930 to current year)
+                min_date = date(1930, 1, 1)
+                max_date = date.today()
+                dob = st.date_input(
+                    "Date of Birth *", 
+                    value=None,
+                    min_value=min_date,
+                    max_value=max_date,
+                    help="Select date of birth (from 1930 onwards)"
+                )
                 gender = st.selectbox("Gender", ["Male", "Female", "Other"])
             
             with col2:
-                zone = st.text_input("Zone *")
-                branch = st.text_input("Branch Church *")
                 marital_status = st.selectbox("Marital Status", ["Single", "Married", "Divorced", "Widowed"])
                 occupation = st.text_input("Occupation *")
                 password = st.text_input("Preferred Password *", type="password")
@@ -281,7 +322,8 @@ def main():
             submitted = st.form_submit_button("➕ Register New Participant", use_container_width=True)
             
             if submitted:
-                if all([first_name, last_name, email, phone, zone, branch, occupation, password]):
+                # Validate all required fields
+                if all([first_name, last_name, email, phone, selected_zone, selected_branch, occupation, password, dob]):
                     new_data = {
                         'first_name': first_name,
                         'last_name': last_name,
@@ -289,8 +331,8 @@ def main():
                         'phone': phone,
                         'dob': dob.strftime('%Y-%m-%d') if dob else '',
                         'gender': gender,
-                        'zone': zone,
-                        'branch': branch,
+                        'zone': selected_zone,
+                        'branch': selected_branch,
                         'marital_status': marital_status,
                         'occupation': occupation,
                         'password': password
@@ -305,7 +347,7 @@ def main():
                     st.session_state.show_success = True
                     st.session_state.success_message = f"✅ {first_name} {last_name} has been successfully registered and marked as PRESENT!"
                     
-                    # Rerun to clear the form and show success message
+                    # Rerun to clear the form
                     st.rerun()
                 else:
                     st.error("❌ Please fill all required fields (*)")
