@@ -18,6 +18,9 @@ ZONES_BRANCHES = {
     "Odeda Zone": ["Odeda", "Agbetu", "Olugbo", "Orile-ilugun", "Olofin", "Fagbohun", "Olokokun"]
 }
 
+# Define occupation options
+OCCUPATION_OPTIONS = ["Student", "Artisan", "Civil Servant", "Entrepreneur"]
+
 # Custom CSS for better styling
 st.markdown("""
     <style>
@@ -160,6 +163,29 @@ def search_participants(df, search_term, search_by):
         mask = df[search_by].astype(str).str.contains(search_term, case=False, na=False)
         return df[mask]
     return df
+
+def check_duplicate(df, first_name, last_name, email):
+    """Check if participant already exists by name or email"""
+    if df is None or len(df) == 0:
+        return None
+    
+    # Check for duplicate name (case insensitive)
+    name_duplicate = df[
+        (df['First_Name'].str.lower() == first_name.lower()) & 
+        (df['Last_Name'].str.lower() == last_name.lower())
+    ]
+    
+    if not name_duplicate.empty:
+        return f"❌ {first_name} {last_name} is already registered!"
+    
+    # Check for duplicate email (case insensitive)
+    email_duplicate = df[df['Username/Email'].str.lower() == email.lower()]
+    
+    if not email_duplicate.empty:
+        existing_name = f"{email_duplicate.iloc[0]['First_Name']} {email_duplicate.iloc[0]['Last_Name']}"
+        return f"❌ Email '{email}' is already used by {existing_name}!"
+    
+    return None
 
 def add_new_participant(df, new_data):
     """Add new participant to dataframe"""
@@ -469,7 +495,11 @@ def main():
             
             with col2:
                 marital_status = st.selectbox("Marital Status", ["Single", "Married", "Divorced", "Widowed"])
-                occupation = st.text_input("Occupation *")
+                occupation = st.selectbox(
+                    "Occupation *", 
+                    options=OCCUPATION_OPTIONS,
+                    help="Select the participant's occupation"
+                )
                 password = st.text_input("Preferred Password *", type="password")
             
             submitted = st.form_submit_button("➕ Register New Participant", use_container_width=True)
@@ -477,31 +507,38 @@ def main():
             if submitted:
                 # Validate all required fields
                 if all([first_name, last_name, email, phone, selected_zone, selected_branch, occupation, password, dob]):
-                    new_data = {
-                        'first_name': first_name,
-                        'last_name': last_name,
-                        'email': email,
-                        'phone': phone,
-                        'dob': dob.strftime('%Y-%m-%d') if dob else '',
-                        'gender': gender,
-                        'zone': selected_zone,
-                        'branch': selected_branch,
-                        'marital_status': marital_status,
-                        'occupation': occupation,
-                        'password': password
-                    }
                     
-                    st.session_state.participants_df = add_new_participant(
-                        st.session_state.participants_df, 
-                        new_data
-                    )
+                    # Check for duplicates before adding
+                    duplicate_error = check_duplicate(st.session_state.participants_df, first_name, last_name, email)
                     
-                    # Set success message
-                    st.session_state.show_success = True
-                    st.session_state.success_message = f"✅ {first_name} {last_name} has been successfully registered and marked as PRESENT!"
-                    
-                    # Rerun to clear the form
-                    st.rerun()
+                    if duplicate_error:
+                        st.error(duplicate_error)
+                    else:
+                        new_data = {
+                            'first_name': first_name,
+                            'last_name': last_name,
+                            'email': email,
+                            'phone': phone,
+                            'dob': dob.strftime('%Y-%m-%d') if dob else '',
+                            'gender': gender,
+                            'zone': selected_zone,
+                            'branch': selected_branch,
+                            'marital_status': marital_status,
+                            'occupation': occupation,
+                            'password': password
+                        }
+                        
+                        st.session_state.participants_df = add_new_participant(
+                            st.session_state.participants_df, 
+                            new_data
+                        )
+                        
+                        # Set success message
+                        st.session_state.show_success = True
+                        st.session_state.success_message = f"✅ {first_name} {last_name} has been successfully registered and marked as PRESENT!"
+                        
+                        # Rerun to clear the form
+                        st.rerun()
                 else:
                     st.error("❌ Please fill all required fields (*)")
     
@@ -526,6 +563,7 @@ def main():
         - ✅ Attendance timestamps recorded
         - ✅ Visual badges for attendance status
         - 💾 **Auto-save to temporary storage (prevents data loss)**
+        - 🚫 **Duplicate prevention (no duplicate names or emails)**
         
         ### CSV Format Expected:
         The system expects columns similar to:
