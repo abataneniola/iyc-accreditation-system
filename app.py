@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import uuid
 from datetime import datetime, date
+import os
+import tempfile
 
 # Page configuration
 st.set_page_config(page_title="IYC Accreditation System", page_icon="📋", layout="wide")
@@ -70,23 +72,60 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'participants_df' not in st.session_state:
-    st.session_state.participants_df = None
-if 'attendance_df' not in st.session_state:
-    st.session_state.attendance_df = None
-if 'new_participants' not in st.session_state:
-    st.session_state.new_participants = []
-if 'show_success' not in st.session_state:
-    st.session_state.show_success = False
-if 'success_message' not in st.session_state:
-    st.session_state.success_message = ""
-if 'clear_form' not in st.session_state:
-    st.session_state.clear_form = False
-if 'uploaded_file_name' not in st.session_state:
-    st.session_state.uploaded_file_name = None
-if 'selected_zone' not in st.session_state:
-    st.session_state.selected_zone = "Ayetoro Zone"
+# Initialize ALL session state variables at the beginning
+def initialize_session_state():
+    """Initialize all session state variables"""
+    if 'participants_df' not in st.session_state:
+        st.session_state.participants_df = None
+    if 'attendance_df' not in st.session_state:
+        st.session_state.attendance_df = None
+    if 'new_participants' not in st.session_state:
+        st.session_state.new_participants = []
+    if 'show_success' not in st.session_state:
+        st.session_state.show_success = False
+    if 'success_message' not in st.session_state:
+        st.session_state.success_message = ""
+    if 'clear_form' not in st.session_state:
+        st.session_state.clear_form = False
+    if 'uploaded_file_name' not in st.session_state:
+        st.session_state.uploaded_file_name = None
+    if 'selected_zone' not in st.session_state:
+        st.session_state.selected_zone = "Ayetoro Zone"
+    if 'temp_file_path' not in st.session_state:
+        st.session_state.temp_file_path = None
+    if 'last_save_time' not in st.session_state:
+        st.session_state.last_save_time = None
+    if 'auto_save_enabled' not in st.session_state:
+        st.session_state.auto_save_enabled = True
+
+# Call initialization
+initialize_session_state()
+
+def save_to_temp_file(df):
+    """Save dataframe to temporary file for persistence"""
+    if df is not None and st.session_state.auto_save_enabled:
+        try:
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, f"iyc_accreditation_{st.session_state.uploaded_file_name}.csv")
+            df.to_csv(temp_file, index=False)
+            st.session_state.temp_file_path = temp_file
+            st.session_state.last_save_time = datetime.now()
+            return True
+        except Exception as e:
+            st.error(f"Error saving to temp file: {str(e)}")
+            return False
+    return False
+
+def load_from_temp_file():
+    """Load dataframe from temporary file"""
+    if st.session_state.temp_file_path and os.path.exists(st.session_state.temp_file_path):
+        try:
+            df = pd.read_csv(st.session_state.temp_file_path)
+            return df
+        except Exception as e:
+            st.error(f"Error loading from temp file: {str(e)}")
+            return None
+    return None
 
 def load_csv(file):
     """Load CSV file and prepare dataframe"""
@@ -106,6 +145,9 @@ def load_csv(file):
         # Add attendance timestamp column
         if 'attendance_time' not in df.columns:
             df['attendance_time'] = ''
+        
+        # Save to temp file for persistence
+        save_to_temp_file(df)
         
         return df
     except Exception as e:
@@ -139,12 +181,21 @@ def add_new_participant(df, new_data):
         'attendance_status': 'Present',
         'attendance_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
-    return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    
+    # Save to temp file after adding
+    save_to_temp_file(updated_df)
+    
+    return updated_df
 
 def update_attendance(df, participant_id, status):
     """Update attendance status for a participant"""
     df.loc[df['participant_id'] == participant_id, 'attendance_status'] = status
     df.loc[df['participant_id'] == participant_id, 'attendance_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Save to temp file after update
+    save_to_temp_file(df)
+    
     return df
 
 def remove_csv():
@@ -153,6 +204,14 @@ def remove_csv():
     st.session_state.uploaded_file_name = None
     st.session_state.show_success = False
     st.session_state.success_message = ""
+    
+    # Clear temp file if exists
+    if st.session_state.temp_file_path and os.path.exists(st.session_state.temp_file_path):
+        try:
+            os.remove(st.session_state.temp_file_path)
+        except:
+            pass
+    st.session_state.temp_file_path = None
 
 def get_attendance_badge(status):
     """Return HTML badge for attendance status"""
@@ -167,20 +226,54 @@ def main():
     st.title("🎯 IYC Participants Accreditation System")
     st.markdown("---")
     
+    # Check for temp file recovery on startup
+    if st.session_state.participants_df is None and st.session_state.temp_file_path:
+        recovered_df = load_from_temp_file()
+        if recovered_df is not None:
+            st.session_state.participants_df = recovered_df
+            st.warning("🔄 Recovered previously saved data from temporary storage!")
+    
     # Display success message if exists
     if st.session_state.show_success:
         st.success(st.session_state.success_message)
         st.session_state.show_success = False
         st.session_state.success_message = ""
     
+    # Auto-save status indicator
+    if st.session_state.participants_df is not None and st.session_state.last_save_time:
+        st.caption(f"💾 Last auto-saved: {st.session_state.last_save_time.strftime('%H:%M:%S')}")
+    
     # Sidebar for file upload
     with st.sidebar:
         st.header("📁 Data Management")
+        
+        # Auto-save toggle
+        if st.session_state.participants_df is not None:
+            auto_save = st.checkbox("Enable Auto-Save", value=st.session_state.auto_save_enabled)
+            if auto_save != st.session_state.auto_save_enabled:
+                st.session_state.auto_save_enabled = auto_save
+                if auto_save and st.session_state.participants_df is not None:
+                    save_to_temp_file(st.session_state.participants_df)
+                    st.success("Auto-save enabled and data saved!")
+        
+        # Manual save button
+        if st.session_state.participants_df is not None:
+            if st.button("💾 Manual Save Now", use_container_width=True):
+                if save_to_temp_file(st.session_state.participants_df):
+                    st.success(f"Data saved manually at {datetime.now().strftime('%H:%M:%S')}")
+                else:
+                    st.error("Failed to save data")
+        
+        st.markdown("---")
         
         # Show current file status
         if st.session_state.participants_df is not None:
             st.info(f"📄 Currently loaded: **{st.session_state.uploaded_file_name}**")
             st.markdown(f"**Total records:** {len(st.session_state.participants_df)}")
+            
+            # Show recent changes
+            present_count = len(st.session_state.participants_df[st.session_state.participants_df['attendance_status'] == 'Present'])
+            st.caption(f"✅ Present: {present_count}")
         
         # File uploader (only show if no file loaded or after removal)
         if st.session_state.participants_df is None:
@@ -197,7 +290,7 @@ def main():
         if st.session_state.participants_df is not None:
             st.markdown("---")
             st.markdown('<div class="remove-button">', unsafe_allow_html=True)
-            if st.button("🗑️ Remove Current CSV", type="secondary"):
+            if st.button("🗑️ Remove Current CSV", type="secondary", use_container_width=True):
                 remove_csv()
                 st.success("CSV data removed! You can now upload a new file.")
                 st.rerun()
@@ -211,12 +304,17 @@ def main():
             # Prepare download data
             download_df = st.session_state.participants_df.copy()
             
+            # Remove password column for download (optional)
+            if 'Preferred_Password' in download_df.columns:
+                download_df = download_df.drop(columns=['Preferred_Password'])
+            
             csv = download_df.to_csv(index=False)
             st.download_button(
                 label="📥 Download Updated CSV",
                 data=csv,
                 file_name=f"iyc_participants_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
+                mime="text/csv",
+                use_container_width=True
             )
             
             # Statistics with visual indicators
@@ -250,7 +348,7 @@ def main():
             search_by = st.selectbox("Search by", ['First_Name', 'Last_Name', 'Zone', 'Branch_Church', 'Username/Email', 'attendance_status'], key="search_by")
         
         with col3:
-            if st.button("🔄 Clear Search"):
+            if st.button("🔄 Clear Search", use_container_width=True):
                 search_term = ""
                 st.rerun()
         
@@ -322,7 +420,7 @@ def main():
                         st.warning(f"❌ {participant['First_Name']} {participant['Last_Name']} marked as ABSENT at {datetime.now().strftime('%H:%M:%S')}")
                         st.rerun()
         
-        # Add new participant section - WITH DYNAMIC ZONE/BRANCH OUTSIDE FORM
+        # Add new participant section
         st.markdown("---")
         st.header("➕ Add New Participant (Not in CSV)")
         
@@ -427,6 +525,7 @@ def main():
         - ✅ Export updated data anytime
         - ✅ Attendance timestamps recorded
         - ✅ Visual badges for attendance status
+        - 💾 **Auto-save to temporary storage (prevents data loss)**
         
         ### CSV Format Expected:
         The system expects columns similar to:
